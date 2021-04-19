@@ -63,7 +63,7 @@ export class EnvReader {
 
             return result;
         } catch (err) {
-            this.app.logger.warn(`[egg-apollo-client] read env_file: ${envPath} error when apollo start`);
+            this.app.logger.warn(`[egg-zzc-apolloclient] read env_file: ${envPath} error when apollo start`);
         }
     }
 }

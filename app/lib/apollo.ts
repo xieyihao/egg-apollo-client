@@ -4,11 +4,15 @@ import * as EventEmitter from 'events';
 import * as assert from 'assert';
 
 import { Application } from 'egg';
+import * as clonedeep from 'lodash.clonedeep';
 import request, { RequestError } from './request';
 
 import curl, { CurlMethods, CurlResponse } from '../../lib/curl';
 import Configs from './configs';
 import { EnvReader } from './env-reader';
+
+import loadTs from '../../lib/loadTs';
+import * as fileUtil from '../../lib/file';
 
 export interface IApolloConfig {
     config_server_url: string;
@@ -24,6 +28,8 @@ export interface IApolloConfig {
     env_file_type?: string;
     init_on_start?: boolean;
     timeout?: number;
+    mountApp?: boolean;
+    mountAgent?: boolean;
 }
 
 export interface IApolloRequestConfig {
@@ -94,9 +100,15 @@ export default class Apollo extends EventEmitter {
     private _delay = 1000;
     private _timeout = 50000;
 
+    private _mountApp = false;
+    private _mountAgent = true;
+
     private _apollo_env: { [x: string]: string } = {};
     private _configs = new Configs();
     private _notifications: {[x: string]: number} = {};
+
+    private baseDir: string = '';
+    private apolloConfigFunc: Function = ()=>{};
 
     constructor(config: IApolloConfig, app: Application) {
         super();
@@ -115,6 +127,22 @@ export default class Apollo extends EventEmitter {
             env_file_type: this.env_file_type,
             app: this.app,
         });
+
+        try {            
+            // 加载（load）项目config/config.apollo.js文件。
+            const baseDir = this.app.config.baseDir;
+            const apolloConfigPath = path.resolve(baseDir, 'config/config.apollo.js');
+            const apolloConfigFunc: Function = loadTs(apolloConfigPath).default || loadTs(apolloConfigPath);
+
+            this.baseDir = baseDir;
+            this.apolloConfigFunc = apolloConfigFunc;
+        } catch(error) {
+            app.logger.error('[egg-zzc-apolloclient] constructor, loader config/config.apollo.js error', {
+                extras: {
+                    error: error.toString(),
+                }
+            });
+        }
     }
 
     get config_server_url() {
@@ -179,6 +207,13 @@ export default class Apollo extends EventEmitter {
 
     get timeout() {
         return this._timeout;
+    }
+
+    get mountApp() {
+        return this._mountApp;
+    }
+    get mountAgent() {
+        return this._mountAgent;
     }
 
     get envReader() {
@@ -252,7 +287,7 @@ export default class Apollo extends EventEmitter {
             }
 
             if (error) {
-                this.app.logger.warn('[egg-apollo-client] %j', error);
+                this.app.logger.warn('[egg-zzc-apolloclient] %j', error);
 
                 if (this.set_env_file) {
                     this.readFromEnvFile();
@@ -307,13 +342,17 @@ export default class Apollo extends EventEmitter {
         if (response.isJSON() || response.statusCode === 304) {
             if (response.data) {
                 this.setEnv(response.data);
-                this.emit('config.updated', response.data);
+                const updateConfig = this.generateAoplloConfig();
+                await this.saveConfig2JsonFile(updateConfig);
+                // 返回经过 apolloConfigFunc 处理的结果配置。
+                this.emit('config.updated', updateConfig);
+                // this.emit('config.updated', response.data);
             }
             return response.data;
         }
         else {
             const error = new RequestError(response.data);
-            this.app.logger.error('[egg-apollo-client] %j', error);
+            this.app.logger.error('[egg-zzc-apolloclient] %j', error);
         }
     }
 
@@ -348,7 +387,7 @@ export default class Apollo extends EventEmitter {
                     // 每次重试都要加长延时时间
                     this._setDelay();
                 } else {
-                    this.app.logger.error('[egg-apollo-client] request notification config got error more than 10 times. stop watching');
+                    this.app.logger.error('[egg-zzc-apolloclient] request notification config got error more than 10 times. stop watching');
                     break;
                 }
             }
@@ -382,6 +421,42 @@ export default class Apollo extends EventEmitter {
         } else {
             return response.data;
         }
+    }
+
+    generateAoplloConfig() {
+        let apolloConfig = {};
+        try {
+            apolloConfig = this.apolloConfigFunc(this, clonedeep(this.app.config));
+        } catch (error) {
+            this.app.logger.error('apollo update config, merge error', {
+                extras: {
+                    error,
+                }
+            });
+        }
+        return apolloConfig;
+    }
+
+    async saveConfig2JsonFile(apolloConfig) {
+      const baseDir = this.baseDir;
+      const tempDirpath = path.resolve(baseDir, fileUtil.tempDirpath);
+      const tempApolloFilePath = path.resolve(
+        tempDirpath,
+        fileUtil.tempApolloConfigFileName
+      );
+
+      // 写文件。
+      try {
+        await fileUtil.dirExists(tempDirpath).then(() => {
+          fileUtil.writeFileSync(tempApolloFilePath, apolloConfig);
+        });
+      } catch (error) {
+        this.app.logger.warn('[egg-zzc-apolloclient] 写文件 .temp/apollo_config.json error', {
+            extras: {
+              error,
+            },
+        });
+      }
     }
 
     get(key: string) {

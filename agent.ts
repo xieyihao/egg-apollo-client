@@ -1,9 +1,6 @@
 import { Application, IBoot } from 'egg';
 import * as merge from 'lodash.merge';
-import * as clonedeep from 'lodash.clonedeep';
 import Apollo, { IApolloConfig } from './app/lib/apollo';
-import * as path from 'path';
-import loadTs from './lib/loadTs';
 
 export default class FooBoot implements IBoot {
     private app: Application & {apollo?: Apollo};
@@ -16,6 +13,9 @@ export default class FooBoot implements IBoot {
         const app = this.app;
 
         const config: IApolloConfig = app.config.apollo;
+        if (config.mountAgent === false) {
+            return;
+        }
         if (config.init_on_start === false) {
             return;
         }
@@ -23,19 +23,19 @@ export default class FooBoot implements IBoot {
         if (!app.apollo) {
             app.apollo = new Apollo(app.config.apollo, app);
             app.apollo.init();
-
-            const appConfig = this.app.config;
-            const apolloConfigPath = path.resolve(appConfig.baseDir, 'config/config.apollo.js');
-
             try {
-                const apolloConfigFunc: Function = loadTs(apolloConfigPath).default || loadTs(apolloConfigPath);
-                const apolloConfig = apolloConfigFunc(app.apollo, clonedeep(app.config));
-
+                const apolloConfig = app.apollo.generateAoplloConfig();
+                app.apollo.saveConfig2JsonFile(apolloConfig);
                 merge(app.config, apolloConfig);
-                app.apollo.emit('config.loaded');
+                // 插件优先启动，agent和app（worker）都未启动，故也接收不到消息。
+                app.apollo.emit('config.loaded', apolloConfig);
                 return;
-            } catch (_) {
-                app.logger.warn('[egg-apollo-client] loader config/config.apollo.js error');
+            } catch (error) {
+                app.logger.warn('[egg-zzc-apolloclient] agent error', {
+                    extras: {
+                        error,
+                    }
+                });
             }
 
         }
@@ -43,6 +43,9 @@ export default class FooBoot implements IBoot {
 
     async willReady() {
         const config: IApolloConfig = this.app.config.apollo;
+        if (config.mountAgent === false) {
+            return;
+        }
         if (config.watch) {
             this.app.apollo.startNotification();
         }

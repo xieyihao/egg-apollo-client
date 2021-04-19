@@ -1,8 +1,6 @@
-# EGG-APOLLO-CLIENT
+# egg-zzc-apolloclient
 [![NPM version][npm-image]][npm-url]
 
-[npm-image]: https://img.shields.io/npm/v/@gaoding/egg-apollo-client.svg?style=flat-square
-[npm-url]: https://npmjs.org/package/@gaoding/egg-apollo-client
 
     ******************************************************************
     ******************************************************************
@@ -13,12 +11,19 @@
 
 携程 Apollo 配置中心 egg 客户端版本
 
+
+## 前排注意
+本仓库是经由[egg-apollo-client](https://github.com/xuezier/egg-apollo-client)针对租租车场景改造而来，主要修改内容：
+
+1. config增加了mountAgent、mountApp配置，目的：单个应用可以只由agent和Apollo Server建立一个长连接，再由agent通知worker更新，达到节约长连接数量。
+2. 在agent上挂载此插件启动时，会将经由`${server.baseDir}/config/config.apollo.js`处理的配置写到`${server.baseDir}/.temp./apollo_config.json`，worker启动时从中读取配置（此方式是受到Egg插件和agent、worker[即：app]启动顺序锁所限制）。
+
 ## FIRST
 使用时，如果遇到编译失败，请确保你的系统安装有 curl 命令行工具
 
 ## Installation
 ```bash
-npm i @gaoding/egg-apollo-client [--save]
+npm i egg-zzc-apolloclient [--save]
 ```
 
 ## Usage
@@ -27,7 +32,7 @@ add plugin
 // config/plugin.js or config/plugin.ts
 exports.apollo = {
     enable: true,
-    package: '@gaoding/egg-apollo-client'
+    package: 'egg-zzc-apolloclient'
 }
 ```
 
@@ -47,6 +52,8 @@ config.apollo = {
     env_file_path: 'xxxx',                  // optional, 写入的 env 文件路径, default: ${app.baseDir}/.env.apollo
     watch: false,                           // optional, 长轮询查看配置是否更新, default: false
     timeout: 50000,                         // optional, 长轮询 timeout 设置，默认 50000
+    mountAgent: true,                       // optional, 是否在agent上挂载插件。默认：true。
+    mountApp: false,                        // optional, 是否在app（即worker）上挂载插件。默认：false。
 }
 ```
 
@@ -104,7 +111,7 @@ module.exports = (apollo, appConfig) => {
 ```
 
 ### 启动自定义
-egg-apollo-client 没有特殊配置只加载符合配置项(config.apollo)的配置信息，如果有需要其他的额外配置，可以另外通过启动自定义来配置
+egg-zzc-apolloclient 没有特殊配置只加载符合配置项(config.apollo)的配置信息，如果有需要其他的额外配置，可以另外通过启动自定义来配置
 ```js
 // app.js
 class AppBootHook {
